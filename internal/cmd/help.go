@@ -4,18 +4,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func NewHelp() *Cmd {
-	return &Cmd{
+// NewHelp creates the /help command.
+func NewHelp() Cmd {
+	return Cmd{
 		Name:        "help",
 		Description: "Show a list of commands and their descriptions.",
-		Handler:     handler,
-	}
-}
-
-func handler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
+		Handler: NewReplyHandler(&discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Title: "Commands and FAQ",
@@ -69,6 +63,6 @@ func handler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					},
 				},
 			},
-		},
-	})
+		}),
+	}
 }
