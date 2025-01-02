@@ -1,7 +1,9 @@
+// steambot provides a Steam Sale Discord bot.
 package steambot
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,24 +15,35 @@ import (
 var _ = fmt.Println
 
 type SteamBot struct {
-	s    *discordgo.Session
+	*discordgo.Session
 	gid  string
-	cmds map[string]*cmd.Cmd
+	cmds map[string]cmd.Cmd
 }
 
+// New creates a new Steam bot with a given Discord API bot token.
+// An optional Guild ID can be supplied to exclusively register commands to.
+// Otherwise, "" can be used to register the commands globally.
+// Use b.Start() to start the bot.
 func New(token, guild string) (b *SteamBot) {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		panic("Invalid bot parameters: " + err.Error())
+		log.Fatal("Invalid bot parameters:", err)
 	}
 
 	b = &SteamBot{
-		s:    dg,
-		gid:  guild,
-		cmds: make(map[string]*cmd.Cmd),
+		Session: dg,
+		gid:     guild,
+		cmds:    make(map[string]cmd.Cmd),
 	}
 
-	b.s.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	b.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.GuildID == "" {
+			cmd.NewReplyHandler(
+				&discordgo.InteractionResponseData{
+					Content: "Please try commands in a server"},
+			)(s, i)
+		}
+
 		if cmd, ok := b.cmds[i.ApplicationCommandData().Name]; ok {
 			cmd.Handler(s, i)
 		}
@@ -39,30 +52,32 @@ func New(token, guild string) (b *SteamBot) {
 	return b
 }
 
+// Start opens the bot and registers its commands.
 func (b *SteamBot) Start() {
-	err := b.s.Open()
+	err := b.Open()
 	if err != nil {
-		panic("Failed to open session: " + err.Error())
+		log.Fatal("Failed to open session:", err)
 	}
 
 	b.register(
 		cmd.NewHelp(),
+		cmd.NewAddApps(),
 	)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
 
-	b.s.Close()
+	b.Close()
 }
 
-// Register registers commands for the bot
-func (b *SteamBot) register(newCmds ...*cmd.Cmd) {
+// register registers commands for the bot.
+func (b *SteamBot) register(newCmds ...cmd.Cmd) {
 	// Add new cmds to map
 	for _, newCmd := range newCmds {
 		_, exists := b.cmds[newCmd.Name]
 		if exists {
-			panic("Command [" + newCmd.Name + "] already exists")
+			log.Fatal("Command [" + newCmd.Name + "] already exists")
 		}
 
 		b.cmds[newCmd.Name] = newCmd
@@ -75,8 +90,8 @@ func (b *SteamBot) register(newCmds ...*cmd.Cmd) {
 	}
 
 	// Write ApplicationCommands to API
-	_, err := b.s.ApplicationCommandBulkOverwrite(b.s.State.User.ID, b.gid, appCmds)
+	_, err := b.ApplicationCommandBulkOverwrite(b.State.User.ID, b.gid, appCmds)
 	if err != nil {
-		panic("Failed to register commands: " + err.Error())
+		log.Fatal("Failed to register commands: ", err)
 	}
 }
