@@ -8,7 +8,7 @@ import (
 func NewHelp() Cmd {
 	return Cmd{
 		Name:        "help",
-		Description: "Show a list of commands and their descriptions.",
+		Description: "Show a list of commands and their descriptions",
 		Handler: NewReplyHandler(&discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{

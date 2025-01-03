@@ -44,48 +44,46 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	succ, fail := db.AddApps(guildID, apps)
 
-	fields := []*discordgo.MessageEmbedField{}
+	em := &discordgo.MessageEmbed{Title: "Add Apps"}
 
 	// Add successful apps field
-	builder := strings.Builder{}
+	sb := strings.Builder{}
 	for _, app := range succ {
-		builder.WriteString(fmt.Sprintf("%s (%d)\n", app.Name, app.Appid))
+		sb.WriteString(fmt.Sprintf("%s (%d)\n", app.Name, app.Appid))
 	}
-	if succStr := builder.String(); succStr != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
+	if succStr := sb.String(); succStr != "" {
+		em.Fields = append(em.Fields, &discordgo.MessageEmbedField{
 			Name:  "Successfully added",
 			Value: succStr,
 		})
 	}
 
 	// Add unsuccessful apps field
-	builder.Reset()
+	sb.Reset()
 	for _, id := range invalidAppids {
-		builder.WriteString(id + "\n")
+		sb.WriteString(id + "\n")
 	}
 	for _, app := range fail {
-		builder.WriteString(fmt.Sprintf("%d\n", app.Appid))
+		sb.WriteString(fmt.Sprintf("%d\n", app.Appid))
 	}
-	if failStr := builder.String(); failStr != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
+	if failStr := sb.String(); failStr != "" {
+		em.Fields = append(em.Fields, &discordgo.MessageEmbedField{
 			Name:  "Failed to add",
 			Value: failStr,
 		})
+		em.Footer = &discordgo.MessageEmbedFooter{
+			Text: "Note: Make sure failed appids are either priced or are yet to be released",
+		}
 	}
 
 	EditReply(s, i, &discordgo.WebhookEdit{
-		Embeds: &[]*discordgo.MessageEmbed{
-			{
-				Title:  fmt.Sprintf("Added %d out of %d apps", len(succ), len(succ)+len(fail)),
-				Fields: fields,
-			},
-		},
+		Embeds: &[]*discordgo.MessageEmbed{em},
 	})
 }
 
-// parseAppids iterates through ss and, under the assumption they
-// are appid's, tries to construct App's with them.
-// Successfully created App's and the failed strings from ss are returned
+// parseAppids iterates through ss and, tries to create
+// valid App's with them. Valid apps need to have the price_overview
+// field set or haven't been released yet
 func parseAppids(ss []string) (succ []steam.App, fail []string) {
 	succ = []steam.App{}
 	fail = []string{}
