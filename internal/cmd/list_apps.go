@@ -9,21 +9,22 @@ import (
 	"github.com/jasonly027/steam_sale_discord_bot_go/internal/db"
 )
 
+// NewListApps creates /list_apps.
 func NewListApps() Cmd {
 	return Cmd{
 		Name:        "list_apps",
 		Description: "List all apps being tracked",
-		Handler:     listAppsHandler,
+		Handle:      listAppsHandler,
 	}
 }
 
 func listAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	DeferReply(s, i)
+	DeferMsgReply(s, i)
 
 	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
-		ReplyUnexpected(s, i)
+		EditReplyUnexpected(s, i)
 		return
 	}
 

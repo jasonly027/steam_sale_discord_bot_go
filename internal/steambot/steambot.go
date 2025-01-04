@@ -2,7 +2,6 @@
 package steambot
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -12,12 +11,11 @@ import (
 	"github.com/jasonly027/steam_sale_discord_bot_go/internal/cmd"
 )
 
-var _ = fmt.Println
-
 type SteamBot struct {
 	*discordgo.Session
-	gid  string
-	cmds map[string]cmd.Cmd
+	gid          string
+	cmds         map[string]cmd.Cmd
+	compHandlers map[string]cmd.Handler
 }
 
 // New creates a new Steam bot with a given Discord API bot token.
@@ -31,21 +29,32 @@ func New(token, guild string) (b *SteamBot) {
 	}
 
 	b = &SteamBot{
-		Session: dg,
-		gid:     guild,
-		cmds:    make(map[string]cmd.Cmd),
+		Session:      dg,
+		gid:          guild,
+		cmds:         map[string]cmd.Cmd{},
+		compHandlers: map[string]cmd.Handler{},
 	}
 
 	b.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.GuildID == "" {
-			cmd.NewReplyHandler(
-				&discordgo.InteractionResponseData{
-					Content: "Please try commands in a server"},
-			)(s, i)
-		}
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			// Bot only works in guilds
+			if i.GuildID == "" {
+				cmd.MsgReply(s, i,
+					&discordgo.InteractionResponseData{
+						Content: "Please try commands in a server",
+					})
+			}
 
-		if cmd, ok := b.cmds[i.ApplicationCommandData().Name]; ok {
-			cmd.Handler(s, i)
+			// Map to command's handler
+			if cmd, ok := b.cmds[i.ApplicationCommandData().Name]; ok {
+				cmd.Handle(s, i)
+			}
+		case discordgo.InteractionMessageComponent:
+			// Map to component's handler
+			if handle, ok := b.compHandlers[i.MessageComponentData().CustomID]; ok {
+				handle(s, i)
+			}
 		}
 	})
 
@@ -60,10 +69,10 @@ func (b *SteamBot) Start() {
 	}
 
 	b.register(
-		cmd.NewHelp(),
-		cmd.NewAddApps(),
+		cmd.NewSearch(),
 	)
 
+	// Listen for exit
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -73,17 +82,24 @@ func (b *SteamBot) Start() {
 
 // register registers commands for the bot.
 func (b *SteamBot) register(newCmds ...cmd.Cmd) {
-	// Add new cmds to map
+	// Map cmds and their component handlers
 	for _, newCmd := range newCmds {
 		_, exists := b.cmds[newCmd.Name]
 		if exists {
 			log.Fatal("Command [" + newCmd.Name + "] already exists")
 		}
-
 		b.cmds[newCmd.Name] = newCmd
+
+		for _, handler := range newCmd.CompHandlers {
+			_, exists := b.compHandlers[handler.Name]
+			if exists {
+				log.Fatal("Command handler [" + handler.Name + "] already exists")
+			}
+			b.compHandlers[handler.Name] = handler.Handle
+		}
 	}
 
-	// Create ApplicationCommands from new cmds
+	// Create ApplicationCommands from cmds
 	appCmds := make([]*discordgo.ApplicationCommand, 0, len(b.cmds))
 	for _, cmd := range b.cmds {
 		appCmds = append(appCmds, cmd.ApplicationCommand())

@@ -15,6 +15,7 @@ func NewAddApps() Cmd {
 	return Cmd{
 		Name:        "add_apps",
 		Description: "Add apps by their appid to the tracker",
+		Handle:      addAppsHandler,
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type: discordgo.ApplicationCommandOptionString,
@@ -25,13 +26,12 @@ func NewAddApps() Cmd {
 				MaxLength: 150,
 			},
 		},
-		Handler: addAppsHandler,
 	}
 }
 
 // addAppsHandler is the handler for the add_apps command
 func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	DeferReply(s, i)
+	DeferMsgReply(s, i)
 
 	// Parse appids
 	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
@@ -40,7 +40,8 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Add apps to database
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
-		ReplyUnexpected(s, i)
+		EditReplyUnexpected(s, i)
+		return
 	}
 	succ, fail := db.AddApps(guildID, apps)
 
@@ -91,14 +92,17 @@ func parseAppids(ss []string) (succ []steam.App, fail []string) {
 	for _, s := range ss {
 		s = strings.TrimSpace(s)
 
+		// Check convertible to int
 		appid, err := strconv.Atoi(s)
-		if err != nil || appid < 0 {
+		if err != nil || appid <= 0 {
 			fail = append(fail, s)
 			continue
 		}
 
+		// Check appid references a real App
+		// and is priced or hasn't released yet
 		app, err := steam.NewApp(appid)
-		if err != nil || (app.Initial == "" && !app.ComingSoon) {
+		if err != nil || (app.Initial == "" && app.Final == "" && !app.ComingSoon) {
 			fail = append(fail, s)
 			continue
 		}

@@ -19,17 +19,17 @@ func NewBind() Cmd {
 				Required:     true,
 			},
 		},
-		Handler: bindHandler,
+		Handle: bindHandler,
 	}
 }
 
 func bindHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	DeferReply(s, i)
+	DeferMsgReply(s, i)
 
 	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
-		ReplyUnexpected(s, i)
+		EditReplyUnexpected(s, i)
 		return
 	}
 
@@ -37,7 +37,7 @@ func bindHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channel := i.ApplicationCommandData().Options[0].ChannelValue(nil)
 	channelID, err := strconv.ParseInt(channel.ID, 10, 64)
 	if err != nil {
-		ReplyUnexpected(s, i)
+		EditReplyUnexpected(s, i)
 		return
 	}
 

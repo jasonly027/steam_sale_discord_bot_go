@@ -9,6 +9,7 @@ import (
 	"github.com/jasonly027/steam_sale_discord_bot_go/internal/db"
 )
 
+// NewRemoveApps creates /remove_apps <appid>,<appid>,...
 func NewRemoveApps() Cmd {
 	return Cmd{
 		Name:        "remove_apps",
@@ -23,16 +24,15 @@ func NewRemoveApps() Cmd {
 				MaxLength: 150,
 			},
 		},
-		Handler: removeAppshandler,
+		Handle: removeAppshandler,
 	}
 }
 
 func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	DeferReply(s, i)
-
-	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
+	DeferMsgReply(s, i)
 
 	// Parse appids
+	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
 	appids := []int{}
 	invalidAppids := []string{}
 	for _, str := range strs {
@@ -50,7 +50,8 @@ func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
-		ReplyUnexpected(s, i)
+		EditReplyUnexpected(s, i)
+		return
 	}
 
 	succ, fail := db.RemoveApps(guildID, appids)
@@ -69,6 +70,7 @@ func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		})
 	}
 
+	// Add unsuccessfully deleted apps field
 	sb.Reset()
 	for _, appid := range invalidAppids {
 		sb.WriteString(appid + "\n")

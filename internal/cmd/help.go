@@ -9,7 +9,7 @@ func NewHelp() Cmd {
 	return Cmd{
 		Name:        "help",
 		Description: "Show a list of commands and their descriptions",
-		Handler: NewReplyHandler(&discordgo.InteractionResponseData{
+		Handle: NewMsgReplyHandler(&discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Title: "Commands and FAQ",

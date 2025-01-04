@@ -237,8 +237,6 @@ func RemoveApps(guildID int64, appids []int) (succ []int, fail []int) {
 	return succ, fail
 }
 
-var ErrClearingApps = errors.New("failed to clear some apps")
-
 func ClearApps(guildID int64) error {
 	// Find junction records with guildID filter
 	cur, err := junctionColl.Find(context.Background(), JunctionRecord{ServerID: guildID})
@@ -263,7 +261,7 @@ func ClearApps(guildID int64) error {
 
 	_, fail := RemoveApps(guildID, appids)
 	if len(fail) > 0 {
-		return ErrClearingApps
+		return errors.New("failed to clear some apps")
 	}
 
 	return nil
