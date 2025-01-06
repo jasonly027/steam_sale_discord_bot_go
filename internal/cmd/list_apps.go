@@ -28,28 +28,30 @@ func listAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Get apps
+	// Get apps and create embed reply
 	records, err := db.AppsOf(guildID)
-
-	// Create embed reply
-	embed := &discordgo.MessageEmbed{Title: "List Apps"}
+	var description string
 	switch {
 	case err != nil:
-		embed.Description = "Failed to get apps, please try again"
+		description = "Failed to get apps, please try again"
 
 	case len(records) == 0:
-		embed.Description = "List is empty! Try adding some apps"
+		description = "List is empty! Try adding some apps"
 
 	default:
-		builder := strings.Builder{}
+		sb := strings.Builder{}
 		for _, rec := range records {
-			builder.WriteString(fmt.Sprintf("%s (%d)\n", *rec.AppName, rec.Appid))
+			sb.WriteString(fmt.Sprintf("%s (%d)\n", *rec.AppName, rec.Appid))
 		}
-
-		embed.Description = builder.String()
+		description = sb.String()
 	}
 
 	EditReply(s, i, &discordgo.WebhookEdit{
-		Embeds: &[]*discordgo.MessageEmbed{embed},
+		Embeds: &[]*discordgo.MessageEmbed{
+			{
+				Title:       "List Apps",
+				Description: description,
+			},
+		},
 	})
 }

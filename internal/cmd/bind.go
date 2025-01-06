@@ -42,19 +42,19 @@ func bindHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	// Bind and create embed reply
-	err = db.SetChannelID(guildID, channelID)
-	var embed *discordgo.MessageEmbed
-	if err != nil {
-		embed = &discordgo.MessageEmbed{
-			Title:       "Bind",
-			Description: "Failed to bind, please try again",
-		}
+	var description string
+	if err := db.SetChannelID(guildID, channelID); err != nil {
+		description = "Failed to bind, please try again"
 	} else {
-		embed = &discordgo.MessageEmbed{
-			Title:       "Bind",
-			Description: "Successfully bound to " + channel.Mention(),
-		}
+		description = "Successfully bound to " + channel.Mention()
 	}
 
-	EditReply(s, i, &discordgo.WebhookEdit{Embeds: &[]*discordgo.MessageEmbed{embed}})
+	EditReply(s, i, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{
+			{
+				Title:       "Bind",
+				Description: description,
+			},
+		},
+	})
 }

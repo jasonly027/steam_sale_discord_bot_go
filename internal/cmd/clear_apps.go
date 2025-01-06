@@ -66,7 +66,7 @@ func clearAppsCompDeleteHandler(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	// Try to clear apps and write reply embed
+	// Clear apps and create embed reply
 	var description string
 	if err := db.ClearApps(guildID); err != nil {
 		description = "Failed to clear some apps, please try again"

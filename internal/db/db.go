@@ -23,35 +23,6 @@ var (
 	junctionColl *mongo.Collection
 )
 
-// Init intializes the database. Close() should be called to close the database.
-func Init(uri, dbName string) {
-	var err error
-
-	client, err = mongo.Connect(context.Background(),
-		options.Client().
-			ApplyURI(uri).
-			SetSocketTimeout(15*time.Second))
-	if err != nil {
-		log.Fatal("Failed to connect to db", err)
-	}
-
-	err = client.Ping(context.Background(), nil)
-	if err != nil {
-		log.Fatal("Failed to ping db", err)
-	}
-
-	appsColl = client.Database(dbName).Collection("apps")
-	discordColl = client.Database(dbName).Collection("discord")
-	junctionColl = client.Database(dbName).Collection("junction")
-}
-
-// Close closes the database.
-func Close() {
-	if err := client.Disconnect(context.Background()); err != nil {
-		log.Fatal("Disconnect error:", err)
-	}
-}
-
 type AppRecord struct {
 	Appid   int     `bson:"app_id"`
 	AppName *string `bson:"app_name,omitempty"`
@@ -69,9 +40,45 @@ type JunctionRecord struct {
 	TrailingSaleDay *bool `bson:"is_trailing_sale_day,omitempty"`
 }
 
-func AddServer(guildID, channelID int64) error {
-	if guildID == 0 || channelID == 0 {
-		return errors.New("params cannot be 0. The omitempty tag will remove it from insertion")
+var ErrZeroValueParam = errors.New(
+	"param cannot be zero. The omitempty tag will remove it from insertion",
+)
+
+// Init intializes the database. Close() should be called to close the database.
+func Init(uri, dbName string) {
+	var err error
+
+	client, err = mongo.Connect(
+		context.Background(),
+		options.Client().
+			ApplyURI(uri).
+			SetSocketTimeout(15*time.Second),
+	)
+	if err != nil {
+		log.Fatal("Failed to connect to db", err)
+	}
+
+	if err = client.Ping(context.Background(), nil); err != nil {
+		log.Fatal("Failed to ping db", err)
+	}
+
+	appsColl = client.Database(dbName).Collection("apps")
+	discordColl = client.Database(dbName).Collection("discord")
+	junctionColl = client.Database(dbName).Collection("junction")
+}
+
+// Close closes the database.
+func Close() {
+	if err := client.Disconnect(context.Background()); err != nil {
+		log.Fatal("Disconnect error:", err)
+	}
+}
+
+// AddGuild adds a new DiscordRecord using guildID and channelID.
+// Passing 0 for channelID will leave it unset. No-op if server was already added.
+func AddGuild(guildID, channelID int64) error {
+	if guildID == 0 {
+		return ErrZeroValueParam
 	}
 
 	filter := DiscordRecord{
@@ -82,14 +89,42 @@ func AddServer(guildID, channelID int64) error {
 			ServerID:      guildID,
 			ChannelID:     channelID,
 			SaleThreshold: 1,
-		}}
+		},
+	}
 
 	_, err := discordColl.UpdateOne(
 		context.Background(), filter, rec, options.Update().SetUpsert(true))
 	return err
 }
 
+// RemoveGuild removes the DiscordRecord associated with guildID.
+// Associated JunctionRecord's are also cleared
+func RemoveGuild(guildID int64) error {
+	if guildID == 0 {
+		return ErrZeroValueParam
+	}
+
+	ClearApps(guildID)
+
+	filter := DiscordRecord{
+		ServerID: guildID,
+	}
+
+	_, err := discordColl.DeleteOne(context.Background(), filter)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// AppsOf finds the AppRecord's for the given guildID
 func AppsOf(guildID int64) ([]AppRecord, error) {
+	if guildID == 0 {
+		return nil, ErrZeroValueParam
+	}
+
+	// Find junction records with guildID filter
 	juncfilter := JunctionRecord{ServerID: guildID}
 	cur, err := junctionColl.Find(context.Background(), juncfilter)
 	if err != nil {
@@ -97,6 +132,7 @@ func AppsOf(guildID int64) ([]AppRecord, error) {
 	}
 	defer cur.Close(context.Background())
 
+	// Extract appid from junction record to filter for its app record
 	records := []AppRecord{}
 	for cur.Next(context.Background()) {
 		var juncRec JunctionRecord
@@ -124,21 +160,24 @@ func AppsOf(guildID int64) ([]AppRecord, error) {
 	return records, nil
 }
 
-// AddApps adds new appids to the apps collection and
+// AddApps adds new apps to the apps collection and
 // adds a junction of the appid and guildID to the junction collection.
 // Lists of successfully added and failed to added apps are returned.
+// If an app record for an appid already exists but with a different name,
+// the name will be updated.
 func AddApps(guildID int64, apps []steam.App) (succ []steam.App, fail []steam.App) {
-	succ = []steam.App{}
-	fail = []steam.App{}
+	if guildID == 0 {
+		return nil, apps
+	}
 
-	for i, app := range apps {
-		// Start session
-		sess, err := client.StartSession()
-		if err != nil {
-			return succ, append(fail, apps[i:]...)
-		}
-		defer sess.EndSession(context.Background())
+	// Start session
+	sess, err := client.StartSession()
+	if err != nil {
+		return nil, apps
+	}
+	defer sess.EndSession(context.Background())
 
+	for _, app := range apps {
 		// Start transaction
 		_, err = sess.WithTransaction(context.Background(),
 			func(ctx mongo.SessionContext) (interface{}, error) {
@@ -183,14 +222,19 @@ func AddApps(guildID int64, apps []steam.App) (succ []steam.App, fail []steam.Ap
 	return succ, fail
 }
 
+// RemoveApps removes JunctionRecord's associated with guildID and appids.
+// If a deleted JunctionRecord was the last one referencing an appid, the
+// app's AppRecord is also removed. Returns successfully and unsuccessfully
+// removed apps
 func RemoveApps(guildID int64, appids []int) (succ []int, fail []int) {
-	succ = []int{}
-	fail = []int{}
+	if guildID == 0 {
+		return nil, appids
+	}
 
 	// Start session
 	sess, err := client.StartSession()
 	if err != nil {
-		return succ, appids
+		return nil, appids
 	}
 	defer sess.EndSession(context.Background())
 
@@ -237,7 +281,13 @@ func RemoveApps(guildID int64, appids []int) (succ []int, fail []int) {
 	return succ, fail
 }
 
+// ClearApps removes all JunctionRecord's associated with guildID.
+// Filters for all JunctionRecords to get appids and uses RemoveApps(...).
 func ClearApps(guildID int64) error {
+	if guildID == 0 {
+		return ErrZeroValueParam
+	}
+
 	// Find junction records with guildID filter
 	cur, err := junctionColl.Find(context.Background(), JunctionRecord{ServerID: guildID})
 	if err != nil {
@@ -245,7 +295,7 @@ func ClearApps(guildID int64) error {
 	}
 	defer cur.Close(context.Background())
 
-	// Transform returned records into a list of ids
+	// Extract appid from each record
 	appids := []int{}
 	for cur.Next(context.Background()) {
 		var rec JunctionRecord
@@ -259,6 +309,7 @@ func ClearApps(guildID int64) error {
 		return err
 	}
 
+	// Remove apps by appid
 	_, fail := RemoveApps(guildID, appids)
 	if len(fail) > 0 {
 		return errors.New("failed to clear some apps")
@@ -267,9 +318,10 @@ func ClearApps(guildID int64) error {
 	return nil
 }
 
+// SetChannelID sets the channelID for a guildID in its DiscordRecord
 func SetChannelID(guildID, channelID int64) error {
 	if guildID == 0 || channelID == 0 {
-		return errors.New("params cannot be 0. The omitempty tag will remove it from insertion")
+		return ErrZeroValueParam
 	}
 
 	filter := DiscordRecord{ServerID: guildID}
@@ -279,9 +331,10 @@ func SetChannelID(guildID, channelID int64) error {
 	return err
 }
 
+// SetThreshold sets the saleThreshold for a guildID in its DiscordRecord
 func SetThreshold(guildID int64, threshold int) error {
 	if guildID == 0 || threshold == 0 {
-		return errors.New("params cannot be 0. The omitempty tag will remove it from insertion")
+		return ErrZeroValueParam
 	}
 
 	filter := DiscordRecord{ServerID: guildID}

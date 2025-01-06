@@ -35,21 +35,22 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Parse appids
 	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
-	apps, invalidAppids := parseAppids(strs)
+	succApps, invalidAppids := strsToApps(strs)
 
-	// Add apps to database
+	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
 		EditReplyUnexpected(s, i)
 		return
 	}
-	succ, fail := db.AddApps(guildID, apps)
 
+	// Add and create embed reply
+	succApps, failApps := db.AddApps(guildID, succApps)
 	em := &discordgo.MessageEmbed{Title: "Add Apps"}
 
 	// Add successful apps field
 	sb := strings.Builder{}
-	for _, app := range succ {
+	for _, app := range succApps {
 		sb.WriteString(fmt.Sprintf("%s (%d)\n", app.Name, app.Appid))
 	}
 	if succStr := sb.String(); succStr != "" {
@@ -59,13 +60,13 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		})
 	}
 
-	// Add unsuccessful apps field
+	// Add failed apps field
 	sb.Reset()
 	for _, id := range invalidAppids {
 		sb.WriteString(id + "\n")
 	}
-	for _, app := range fail {
-		sb.WriteString(fmt.Sprintf("%d\n", app.Appid))
+	for _, app := range failApps {
+		sb.WriteString(strconv.Itoa(app.Appid) + "\n")
 	}
 	if failStr := sb.String(); failStr != "" {
 		em.Fields = append(em.Fields, &discordgo.MessageEmbedField{
@@ -82,13 +83,10 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	})
 }
 
-// parseAppids iterates through ss and, tries to create
+// strsToApps iterates through ss and, tries to create
 // valid App's with them. Valid apps need to have the price_overview
 // field set or haven't been released yet
-func parseAppids(ss []string) (succ []steam.App, fail []string) {
-	succ = []steam.App{}
-	fail = []string{}
-
+func strsToApps(ss []string) (succ []steam.App, fail []string) {
 	for _, s := range ss {
 		s = strings.TrimSpace(s)
 

@@ -36,7 +36,7 @@ func NewMsgReplyHandler(data *discordgo.InteractionResponseData) Handler {
 	}
 }
 
-// MsgReply replires to a msg interaction with data.
+// MsgReply replies to a msg interaction with data.
 func MsgReply(s *discordgo.Session, i *discordgo.InteractionCreate,
 	data *discordgo.InteractionResponseData) {
 	NewMsgReplyHandler(data)(s, i)

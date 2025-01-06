@@ -33,19 +33,7 @@ func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Parse appids
 	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
-	appids := []int{}
-	invalidAppids := []string{}
-	for _, str := range strs {
-		str = strings.TrimSpace(str)
-
-		appid, err := strconv.Atoi(str)
-		if err != nil || appid <= 0 {
-			invalidAppids = append(invalidAppids, str)
-			continue
-		}
-
-		appids = append(appids, appid)
-	}
+	succ, invalidAppids := strsToAppids(strs)
 
 	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
@@ -54,8 +42,8 @@ func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	succ, fail := db.RemoveApps(guildID, appids)
-
+	// Remove apps and create embed reply
+	succ, fail := db.RemoveApps(guildID, succ)
 	em := &discordgo.MessageEmbed{Title: "Remove Apps"}
 
 	// Add successfully deleted apps field
@@ -88,4 +76,21 @@ func removeAppshandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	EditReply(s, i, &discordgo.WebhookEdit{
 		Embeds: &[]*discordgo.MessageEmbed{em},
 	})
+}
+
+func strsToAppids(ss []string) (succ []int, fail []string) {
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+
+		// Check convertible to int
+		appid, err := strconv.Atoi(s)
+		if err != nil || appid <= 0 {
+			fail = append(fail, s)
+			continue
+		}
+
+		succ = append(succ, appid)
+	}
+
+	return succ, fail
 }

@@ -39,7 +39,7 @@ func NewSearch() Cmd {
 func searchHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	DeferMsgReply(s, i)
 
-	// Search Steam apps with query
+	// Search for apps matching query
 	query := i.ApplicationCommandData().Options[0].StringValue()
 	res, err := steam.Search(query)
 	if err != nil {
@@ -55,7 +55,7 @@ func searchHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	// Create search results select menu
-	options := make([]discordgo.SelectMenuOption, 0, len(res))
+	options := make([]discordgo.SelectMenuOption, 0, len(res) + 1)
 	for _, r := range res {
 		options = append(options, discordgo.SelectMenuOption{
 			Label: fmt.Sprintf("%s (%d)", r.Name, r.Appid),
@@ -67,6 +67,7 @@ func searchHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		Value: searchCompCancelStr,
 	})
 
+	// Create embed reply
 	EditReply(s, i, &discordgo.WebhookEdit{
 		Embeds: &[]*discordgo.MessageEmbed{
 			{
@@ -90,6 +91,8 @@ func searchHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func searchCompConfirmHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	choice := i.MessageComponentData().Values[0]
+
+	// Check if cancel
 	if choice == clearAppsCompCancel {
 		CompReply(s, i, &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
@@ -105,7 +108,7 @@ func searchCompConfirmHandler(s *discordgo.Session, i *discordgo.InteractionCrea
 
 	DeferCompReply(s, i)
 
-	edit := discordgo.WebhookEdit{
+	reply := discordgo.WebhookEdit{
 		Embeds: &[]*discordgo.MessageEmbed{
 			{
 				Title:       "Search",
@@ -115,24 +118,27 @@ func searchCompConfirmHandler(s *discordgo.Session, i *discordgo.InteractionCrea
 		Components: &[]discordgo.MessageComponent{},
 	}
 
-	succ, _ := parseAppids([]string{choice})
+	// Parse app
+	succ, _ := strsToApps([]string{choice})
 	if len(succ) != 1 {
-		EditReply(s, i, &edit)
+		EditReply(s, i, &reply)
 		return
 	}
 
+	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
 	if err != nil {
 		EditReplyUnexpected(s, i)
 		return
 	}
 
+	// Add app
 	succ, _ = db.AddApps(guildID, succ)
 	if len(succ) != 1 {
-		EditReply(s, i, &edit)
+		EditReply(s, i, &reply)
 		return
 	}
 
-	(*edit.Embeds)[0].Description = "Successfully added app"
-	EditReply(s, i, &edit)
+	(*reply.Embeds)[0].Description = "Successfully added app"
+	EditReply(s, i, &reply)
 }

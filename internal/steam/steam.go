@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// App is appDetails flattened and simplified
 type App struct {
 	Name        string
 	Appid       int
@@ -28,42 +29,53 @@ type Price struct {
 	Final    string `json:"final_formatted"`
 }
 
+// appDetails is the form Steam API naturally returns
 type appDetails struct {
-	Success bool `json:"success"`
-
-	Data struct {
-		Name             string `json:"name"`
-		SteamAppid       int    `json:"steam_appid"`
-		IsFree           bool   `json:"is_free"`
-		ShortDescription string `json:"short_description"`
-		HeaderImage      string `json:"header_image"`
-
-		Recommendations struct {
-			Total int `json:"total"`
-		} `json:"recommendations"`
-
-		ReleaseDate struct {
-			ComingSoon bool `json:"coming_soon"`
-		} `json:"release_date"`
-
-		// Field may be missing, represented by nil
-		PriceOverview Price `json:"price_overview"`
-	} `json:"data"`
+	Success bool           `json:"success"`
+	Data    appDetailsData `json:"data"`
 }
 
+type appDetailsData struct {
+	Name             string `json:"name"`
+	SteamAppid       int    `json:"steam_appid"`
+	IsFree           bool   `json:"is_free"`
+	ShortDescription string `json:"short_description"`
+	HeaderImage      string `json:"header_image"`
+
+	Recommendations recommendations `json:"recommendations"`
+	ReleaseDate     releaseDate     `json:"release_date"`
+	PriceOverview   Price           `json:"price_overview"`
+}
+
+type recommendations struct {
+	Total int `json:"total"`
+}
+
+type releaseDate struct {
+	ComingSoon bool `json:"coming_soon"`
+}
+
+// SearchResult is rawSearchResult with its Appid converted to int
 type SearchResult struct {
 	Appid int
 	Name  string
 }
 
-type searchApp struct {
+// rawSearchResult is the form Steam API naturally returns
+type rawSearchResult struct {
 	Appid string `json:"appid"`
 	Name  string `json:"name"`
 }
 
-// Client is the HTTP client used for requests to the Steam API.
-var client = http.Client{
-	Timeout: 10 * time.Second,
+type httpClient interface {
+	Get(string) (*http.Response, error)
+}
+
+// client is the client used for requests to the Steam API.
+var client httpClient
+
+func init() {
+	client = &http.Client{Timeout: 10 * time.Second}
 }
 
 func (a *App) Url() string {
@@ -83,12 +95,29 @@ func newAppFrom(d appDetails) App {
 	}
 }
 
-func newSearchResultFrom(s searchApp) (SearchResult, error) {
+func newSearchResultFrom(s rawSearchResult) (SearchResult, error) {
 	appid, err := strconv.Atoi(s.Appid)
 	if err != nil {
 		return SearchResult{}, err
 	}
 	return SearchResult{Appid: appid, Name: s.Name}, nil
+}
+
+// apiGet sends a GET request to endpoint and tries to decode it into value
+func apiGet[T any](endpoint string, value *T) error {
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	err = json.NewDecoder(resp.Body).Decode(&value)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	return nil
 }
 
 // NewApp calls the Steam API with appid to retrieve information on that app.
@@ -105,14 +134,8 @@ func NewApp(appid int) (App, error) {
 				"cc":     {"US"},
 			}.Encode()
 
-	resp, err := client.Get(endpoint)
-	if err != nil {
-		return App{}, err
-	}
-	defer resp.Body.Close()
-
 	details := make(map[string]appDetails, 1)
-	err = json.NewDecoder(resp.Body).Decode(&details)
+	err := apiGet(endpoint, &details)
 	if err != nil {
 		return App{}, err
 	}
@@ -124,31 +147,28 @@ func NewApp(appid int) (App, error) {
 	return newAppFrom(details[aid]), nil
 }
 
+// Search calls the Steam API with query to find apps.
+//
+// More information: https://github.com/Revadike/InternalSteamWebAPI/wiki/Search-Apps
 func Search(query string) ([]SearchResult, error) {
 	endpoint :=
 		"https://steamcommunity.com/actions/SearchApps/" + url.QueryEscape(query)
 
-	resp, err := client.Get(endpoint)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	sApps := []searchApp{}
-	err = json.NewDecoder(resp.Body).Decode(&sApps)
+	rawResults := []rawSearchResult{}
+	err := apiGet(endpoint, &rawResults)
 	if err != nil {
 		return nil, err
 	}
 
-	sResults := []SearchResult{}
-	for _, sApp := range sApps {
-		sResult, err := newSearchResultFrom(sApp)
+	results := []SearchResult{}
+	for _, raw := range rawResults {
+		result, err := newSearchResultFrom(raw)
 		if err != nil {
 			continue
 		}
 
-		sResults = append(sResults, sResult)
+		results = append(results, result)
 	}
 
-	return sResults, nil
+	return results, nil
 }
