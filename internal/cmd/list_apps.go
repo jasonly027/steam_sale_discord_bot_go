@@ -41,7 +41,7 @@ func listAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	default:
 		sb := strings.Builder{}
 		for _, rec := range records {
-			sb.WriteString(fmt.Sprintf("%s (%d)\n", *rec.AppName, rec.Appid))
+			sb.WriteString(fmt.Sprintf("%s (%d)\n", rec.AppName, rec.Appid))
 		}
 		description = sb.String()
 	}

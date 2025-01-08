@@ -103,6 +103,8 @@ func newSearchResultFrom(s rawSearchResult) (SearchResult, error) {
 	return SearchResult{Appid: appid, Name: s.Name}, nil
 }
 
+var ErrNetTryAgainLater = errors.New("too many requests. Try again later")
+
 // apiGet sends a GET request to endpoint and tries to decode it into value
 func apiGet[T any](endpoint string, value *T) error {
 	resp, err := client.Get(endpoint)
@@ -110,6 +112,11 @@ func apiGet[T any](endpoint string, value *T) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests ||
+		resp.StatusCode == http.StatusForbidden {
+		return ErrNetTryAgainLater
+	}
 
 	err = json.NewDecoder(resp.Body).Decode(&value)
 	if err != nil {

@@ -16,6 +16,7 @@ func NewBind() Cmd {
 				Type:         discordgo.ApplicationCommandOptionChannel,
 				ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText},
 				Name:         "channel",
+				Description:  "The channel to bind to",
 				Required:     true,
 			},
 		},
@@ -33,8 +34,29 @@ func bindHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	edit := discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{{
+			Title:       "Bind",
+			Description: "Failed to bind, please try again",
+		}},
+	}
+
 	// Parse channelID
 	channel := i.ApplicationCommandData().Options[0].ChannelValue(nil)
+
+	// Check bot is able to message in that channel
+	perms, err := s.State.UserChannelPermissions(s.State.User.ID, channel.ID)
+	if err != nil {
+		EditReply(s, i, &edit)
+		return
+	}
+	if perms&discordgo.PermissionSendMessages == 0 {
+		(*edit.Embeds)[0].Description =
+			"Failed to bind, missing send message permissions for that channel"
+		EditReply(s, i, &edit)
+		return
+	}
+
 	channelID, err := strconv.ParseInt(channel.ID, 10, 64)
 	if err != nil {
 		EditReplyUnexpected(s, i)
@@ -42,19 +64,9 @@ func bindHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	// Bind and create embed reply
-	var description string
-	if err := db.SetChannelID(guildID, channelID); err != nil {
-		description = "Failed to bind, please try again"
-	} else {
-		description = "Successfully bound to " + channel.Mention()
+	if err := db.SetChannelID(guildID, channelID); err == nil {
+		(*edit.Embeds)[0].Description = "Successfully bound to " + channel.Mention()
 	}
 
-	EditReply(s, i, &discordgo.WebhookEdit{
-		Embeds: &[]*discordgo.MessageEmbed{
-			{
-				Title:       "Bind",
-				Description: description,
-			},
-		},
-	})
+	EditReply(s, i, &edit)
 }

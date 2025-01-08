@@ -14,6 +14,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/jasonly027/steam_sale_discord_bot_go/internal/cmd"
 	"github.com/jasonly027/steam_sale_discord_bot_go/internal/db"
+	"github.com/jasonly027/steam_sale_discord_bot_go/internal/steam"
 )
 
 type SteamBot struct {
@@ -42,9 +43,9 @@ func New(token, guild string) (b *SteamBot) {
 
 	b.registerHandlers([]interface{}{
 		b.commandHandler,
-		b.guildCreateHandler,
-		b.guildDeleteHandler,
-		b.readyHandler,
+		// guildCreateHandler,
+		// guildDeleteHandler,
+		// readyHandler,
 	})
 
 	return b
@@ -58,7 +59,7 @@ func (b *SteamBot) Start() {
 	}
 
 	b.registerCommands([]cmd.Cmd{
-		cmd.NewSearch(),
+		cmd.NewBind(),
 	})
 
 	sc := make(chan os.Signal, 1)
@@ -127,7 +128,7 @@ func (b *SteamBot) commandHandler(s *discordgo.Session, i *discordgo.Interaction
 	}
 }
 
-func (b *SteamBot) guildCreateHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
+func guildCreateHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
 	guildID, err := strconv.ParseInt(g.ID, 10, 64)
 	if err != nil {
 		return
@@ -135,7 +136,7 @@ func (b *SteamBot) guildCreateHandler(s *discordgo.Session, g *discordgo.GuildCr
 
 	channelID, err := defaultTextChannel(s, g.Channels)
 	if err != nil {
-		// pass channelID of 0 anyways (will be unset in the record)
+		channelID = 0
 	}
 
 	db.AddGuild(guildID, channelID)
@@ -166,7 +167,7 @@ func defaultTextChannel(s *discordgo.Session, chs []*discordgo.Channel) (int64, 
 	return 0, errors.New("no sendable text channel")
 }
 
-func (b *SteamBot) guildDeleteHandler(s *discordgo.Session, g *discordgo.GuildDelete) {
+func guildDeleteHandler(s *discordgo.Session, g *discordgo.GuildDelete) {
 	// Do nothing if network outage, otherwise it means bot was removed from server
 	if g.Unavailable {
 		return
@@ -180,40 +181,19 @@ func (b *SteamBot) guildDeleteHandler(s *discordgo.Session, g *discordgo.GuildDe
 	db.RemoveGuild(guildID)
 }
 
-func (b *SteamBot) readyHandler(s *discordgo.Session, r *discordgo.Ready) {
-	b.periodicallyUpdateStatus(s)
-	b.periodicallyCheckApps(s)
+func readyHandler(s *discordgo.Session, r *discordgo.Ready) {
+	periodicallyUpdateStatus(s)
+	periodicallyCheckApps(s)
 }
 
-func loc_PDT() *time.Location {
-	loc, err := time.LoadLocation("America/Los_Angeles")
-	if err != nil {
-		log.Fatal("Failed to load location")
-	}
-	return loc
-}
-
-func nextCheck() time.Time {
-	now := time.Now()
-	timeOfCheck := time.Date(now.Year(), now.Month(), now.Day(), 10, 5, 0, 0, loc_PDT())
-	if now.After(timeOfCheck) {
-		timeOfCheck = timeOfCheck.Add(24 * time.Hour)
-	}
-
-	return timeOfCheck
-}
-
-func nextHour() time.Time {
-	return time.Now().Add(time.Hour).Truncate(time.Hour)
-}
-
-func (b *SteamBot) periodicallyUpdateStatus(s *discordgo.Session) {
+// periodicallyUpdateStatus will update the Discord status of the bot
+// to the number of hours left until a sale check is done. Once called,
+// it will call itself every whole hour.
+func periodicallyUpdateStatus(s *discordgo.Session) {
 	var fn func()
 
 	fn = func() {
-		timeOfCheck := nextCheck()
-
-		hrs := int(time.Until(timeOfCheck).Truncate(time.Hour).Hours())
+		hrs := int(time.Until(nextCheck()).Truncate(time.Hour).Hours())
 		var plural string
 		if hrs == 1 {
 			plural = ""
@@ -229,14 +209,126 @@ func (b *SteamBot) periodicallyUpdateStatus(s *discordgo.Session) {
 	fn()
 }
 
-func (b *SteamBot) periodicallyCheckApps(s *discordgo.Session) {
-	var fn func()
+func loc_PDT() *time.Location {
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		log.Fatal("Failed to load location")
+	}
+	return loc
+}
 
-	fn = func() {
-		// TODO
-
-		time.AfterFunc(time.Until(nextCheck()), fn)
+// nextCheck gets when the next sale check is as a Time object.
+func nextCheck() time.Time {
+	now := time.Now()
+	timeOfCheck := time.Date(now.Year(), now.Month(), now.Day(), 10, 5, 0, 0, loc_PDT())
+	if now.After(timeOfCheck) {
+		timeOfCheck = timeOfCheck.Add(24 * time.Hour)
 	}
 
-	fn()
+	return timeOfCheck
+}
+
+// nextHour gets when the next whole hour is as a Time object.
+func nextHour() time.Time {
+	return time.Now().Add(time.Hour).Truncate(time.Hour)
+}
+
+// periodicallyCheckApps will go through all globally added apps to the bot
+// and send sale alerts to all the servers tracking that app if the sale discount
+// is at least that server's discount threshold. Once called, it will call itself
+// daily at 10:05 AM PDT. Due to external API rate limiting when getting app info,
+// the time it takes to finish checking may take a while but not long enough to
+// miss the next daily check. Calls to the external API are done until a rate limit
+// is hit, then this fn waits a period before trying to continue.
+func periodicallyCheckApps(s *discordgo.Session) {
+	// This is the fn that will be periodically called to check apps for sales.
+	var checkApps func()
+
+	// This fn will attempt to fetch an App by appid and check for a sale,
+	// If an error occurs fetching the App (like an inevitable rate limit error
+	// from Steam), a wait out period will be put in place, then checkApps will
+	// be called again to resume checking.
+	var tryCheckApp func(appid int)
+
+	// The id of the App we are fetching. Populated through nextAppid().
+	var currAppid *int
+
+	// This fn will return appids we need to check. When there are no more
+	// appids to check, this will only return nil.
+	var nextAppid func() *int
+
+	// This fn must be called to release resources when we're done calling
+	// nextAppid().
+	var close func()
+
+	checkApps = func() {
+		if nextAppid == nil { // Get fresh apps if non-resuming check
+			nextAppid, close = db.Apps()
+		}
+
+		// Not nil means we are resuming from the previous check that we
+		// were rate limited on. This was the appid we failed to create
+		// an App from, so we retry it.
+		if currAppid != nil {
+			tryCheckApp(*currAppid)
+		}
+
+		for currAppid = nextAppid(); currAppid != nil; {
+			tryCheckApp(*currAppid)
+		}
+
+		close()
+		// Set these to nil to indicate next check is non-resuming check
+		currAppid = nil
+		nextAppid = nil
+		time.AfterFunc(time.Until(nextCheck()), checkApps)
+	}
+
+	tryCheckApp = func(appid int) {
+		app, err := steam.NewApp(appid)
+
+		if err == steam.ErrNetTryAgainLater {
+			// On rate-limit, wait then resume
+			time.AfterFunc(5*time.Minute, checkApps)
+			return
+		} else if err != nil {
+			// On any other error, just abort today's check
+			time.AfterFunc(time.Until(nextCheck()), checkApps)
+			return
+		}
+
+		checkApp(s, app)
+	}
+
+	checkApps()
+}
+
+// checkApp goes through every guild tracking app and sends a sale alert
+// to that guild if there is a sale discount that is at least equal to
+// the server's discount threshold.
+func checkApp(s *discordgo.Session, app steam.App) {
+	guilds, err := db.GuildsOf(app.Appid)
+	if err != nil {
+		return
+	}
+
+	for _, guild := range guilds {
+		updateGuildOnApp(s, app, guild)
+	}
+}
+
+func updateGuildOnApp(s *discordgo.Session, app steam.App, guild db.GuildInfo) {
+	onSale := app.Discount >= 0
+
+	db.SetTrailingSaleDay(guild.ServerID, guild.Appid, onSale)
+
+	if !onSale || guild.TrailingSaleDay || app.Discount < guild.SaleThreshold ||
+		guild.ChannelID == 0 {
+		return
+	}
+
+	// TODO
+	// s.ChannelMessageSendEmbed(strconv.FormatInt(guild.ChannelID, 10),
+	// 	&discordgo.MessageEmbed{},
+	// )
 }
