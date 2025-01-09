@@ -1,1 +1,1 @@
-worker: go run ./main.go
+worker: steam_sale_discord_bot_go
