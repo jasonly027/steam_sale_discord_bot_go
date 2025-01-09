@@ -123,6 +123,7 @@ func (b *SteamBot) commandHandler(s *discordgo.Session, i *discordgo.Interaction
 				&discordgo.InteractionResponseData{
 					Content: "Please try commands in a server",
 				})
+			return
 		}
 
 		if cmd, ok := b.cmds[i.ApplicationCommandData().Name]; ok {
