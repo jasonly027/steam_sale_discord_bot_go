@@ -1,7 +1,9 @@
 // cmd provides slash commands and handlers for interactions.
 package cmd
 
-import "github.com/bwmarrin/discordgo"
+import (
+	"github.com/bwmarrin/discordgo"
+)
 
 type Cmd struct {
 	Name         string

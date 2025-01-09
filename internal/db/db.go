@@ -21,37 +21,39 @@ var (
 )
 
 type AppRecord struct {
-	Appid   int    `bson:"app_id"`
-	AppName string `bson:"app_name"`
-}
-
-type AppFilter struct {
 	Appid   *int    `bson:"app_id,omitempty"`
 	AppName *string `bson:"app_name,omitempty"`
 }
 
-type DiscordRecord struct {
-	ServerID      int64 `bson:"server_id"`
-	ChannelID     int64 `bson:"channel_id"`
-	SaleThreshold int   `bson:"sale_threshold"`
+type AppInfo struct {
+	Appid   int    `bson:"app_id"`
+	AppName string `bson:"app_name"`
 }
 
-type DiscordFilter struct {
+type DiscordRecord struct {
 	ServerID      *int64 `bson:"server_id,omitempty"`
 	ChannelID     *int64 `bson:"channel_id,omitempty"`
 	SaleThreshold *int   `bson:"sale_threshold,omitempty"`
 }
 
-type JunctionRecord struct {
-	Appid           int   `bson:"app_id"`
-	ServerID        int64 `bson:"server_id"`
-	TrailingSaleDay bool  `bson:"is_trailing_sale_day"`
+type DiscordInfo struct {
+	ServerID      int64 `bson:"server_id"`
+	ChannelID     int64 `bson:"channel_id"`
+	SaleThreshold int   `bson:"sale_threshold"`
 }
 
-type JunctionFilter struct {
+type JunctionRecord struct {
 	Appid           *int   `bson:"app_id,omitempty"`
 	ServerID        *int64 `bson:"server_id,omitempty"`
 	TrailingSaleDay *bool  `bson:"is_trailing_sale_day,omitempty"`
+	ComingSoon      *bool  `bson:"coming_soon,omitempty"`
+}
+
+type JunctionInfo struct {
+	Appid           int   `bson:"app_id"`
+	ServerID        int64 `bson:"server_id"`
+	TrailingSaleDay bool  `bson:"is_trailing_sale_day"`
+	ComingSoon      bool  `bson:"coming_soon"`
 }
 
 type GuildInfo struct {
@@ -60,6 +62,7 @@ type GuildInfo struct {
 	Appid           int
 	SaleThreshold   int
 	TrailingSaleDay bool
+	ComingSoon      bool
 }
 
 func ctx() context.Context {
@@ -105,13 +108,13 @@ func validateColFilDoc(coll *mongo.Collection, filter any, doc any) {
 	var ok bool
 
 	switch filter.(type) {
-	case AppFilter:
+	case AppRecord:
 		_, ok = doc.(AppRecord)
 		ok = ok && (coll == appsColl)
-	case DiscordFilter:
+	case DiscordRecord:
 		_, ok = doc.(DiscordRecord)
 		ok = ok && (coll == discordColl)
-	case JunctionFilter:
+	case JunctionRecord:
 		_, ok = doc.(JunctionRecord)
 		ok = ok && (coll == junctionColl)
 	}
@@ -172,12 +175,13 @@ func upsert(coll *mongo.Collection, filter any, doc any) error {
 // and it isn't considered an error. If a channelID cannot be added right now,
 // pass 0 for channelID.
 func AddGuild(guildID, channelID int64) error {
+	saleThreshold := 1
 	return insert(discordColl,
-		DiscordFilter{ServerID: &guildID},
+		DiscordRecord{ServerID: &guildID},
 		DiscordRecord{
-			ServerID:      guildID,
-			ChannelID:     channelID,
-			SaleThreshold: 1,
+			ServerID:      &guildID,
+			ChannelID:     &channelID,
+			SaleThreshold: &saleThreshold,
 		},
 	)
 }
@@ -188,15 +192,15 @@ func AddGuild(guildID, channelID int64) error {
 func RemoveGuild(guildID int64) error {
 	ClearApps(guildID)
 	_, err := discordColl.DeleteOne(ctx(),
-		DiscordFilter{ServerID: &guildID})
+		DiscordRecord{ServerID: &guildID})
 	return err
 }
 
 // AppsOf finds all AppRecords tracked by the guild matching guildID.
 // If guildID hasn't been added through AddGuild(...), an empty
 // list will be returned.
-func AppsOf(guildID int64) (appRecords []AppRecord, err error) {
-	cur, err := junctionColl.Find(ctx(), JunctionFilter{ServerID: &guildID})
+func AppsOf(guildID int64) (appRecords []AppInfo, err error) {
+	cur, err := junctionColl.Find(ctx(), JunctionRecord{ServerID: &guildID})
 	if err != nil {
 		return nil, err
 	}
@@ -204,22 +208,22 @@ func AppsOf(guildID int64) (appRecords []AppRecord, err error) {
 	// Extract appid from each JunctionRecord to filter
 	// for that App's AppRecord
 	for cur.Next(ctx()) {
-		var jRec JunctionRecord
-		if err := cur.Decode(&jRec); err != nil {
+		var jInfo JunctionInfo
+		if err := cur.Decode(&jInfo); err != nil {
 			continue
 		}
 
-		findAppRes := appsColl.FindOne(ctx(), AppFilter{Appid: &jRec.Appid})
+		findAppRes := appsColl.FindOne(ctx(), AppRecord{Appid: &jInfo.Appid})
 		if err := findAppRes.Err(); err != nil {
 			continue
 		}
 
-		var aRec AppRecord
-		if err := findAppRes.Decode(&aRec); err != nil {
+		var aInfo AppInfo
+		if err := findAppRes.Decode(&aInfo); err != nil {
 			continue
 		}
 
-		appRecords = append(appRecords, aRec)
+		appRecords = append(appRecords, aInfo)
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err
@@ -236,7 +240,7 @@ func Apps() (nextApp func() *int, close func()) {
 
 	nextApp = func() *int {
 		for cur.Next(ctx()) {
-			var rec AppRecord
+			var rec AppInfo
 			err := cur.Decode(&rec)
 			if err != nil {
 				continue
@@ -256,38 +260,39 @@ func Apps() (nextApp func() *int, close func()) {
 // GuildsOf finds all guilds tracking the app specified by appid.
 // If appid wasn't added through AddApps(...), guildInfos will be empty.
 func GuildsOf(appid int) (guildInfos []GuildInfo, err error) {
-	cur, err := junctionColl.Find(ctx(), JunctionFilter{Appid: &appid})
+	cur, err := junctionColl.Find(ctx(), JunctionRecord{Appid: &appid})
 	if err != nil {
 		return nil, err
 	}
 	defer cur.Close(ctx())
 
 	for cur.Next(ctx()) {
-		var jRec JunctionRecord
-		if err := cur.Decode(&jRec); err != nil {
+		var jInfo JunctionInfo
+		if err := cur.Decode(&jInfo); err != nil {
 			continue
 		}
 
 		// Given the guildID from a junction, find more info on the guild in
 		// the Discord collection to be able to initialize every field in the
 		// GuildInfo object
-		findDiscRes := discordColl.FindOne(ctx(), DiscordFilter{ServerID: &jRec.ServerID})
+		findDiscRes := discordColl.FindOne(ctx(), DiscordRecord{ServerID: &jInfo.ServerID})
 		if err := findDiscRes.Err(); err != nil {
 			continue
 		}
 
-		var dRec DiscordRecord
-		if err := findDiscRes.Decode(&dRec); err != nil {
+		var dInfo DiscordInfo
+		if err := findDiscRes.Decode(&dInfo); err != nil {
 			continue
 		}
 
 		guildInfos = append(guildInfos,
 			GuildInfo{
-				ServerID:        dRec.ServerID,
-				ChannelID:       dRec.ChannelID,
-				Appid:           jRec.Appid,
-				SaleThreshold:   dRec.SaleThreshold,
-				TrailingSaleDay: jRec.TrailingSaleDay,
+				ServerID:        dInfo.ServerID,
+				ChannelID:       dInfo.ChannelID,
+				Appid:           jInfo.Appid,
+				SaleThreshold:   dInfo.SaleThreshold,
+				TrailingSaleDay: jInfo.TrailingSaleDay,
+				ComingSoon:      jInfo.ComingSoon,
 			},
 		)
 	}
@@ -312,22 +317,24 @@ func AddApps(guildID int64, apps []steam.App) (succ []steam.App, fail []steam.Ap
 	for _, app := range apps {
 		transactionFn := func(ctx mongo.SessionContext) (any, error) {
 			err := upsert(appsColl,
-				AppFilter{Appid: &app.Appid},
+				AppRecord{Appid: &app.Appid},
 				AppRecord{
-					Appid:   app.Appid,
-					AppName: app.Name, // Upsertion is done because name may have changed
+					Appid:   &app.Appid,
+					AppName: &app.Name, // Upsertion is done because name may have changed
 				},
 			)
 			if err != nil {
 				return nil, err
 			}
 
+			trailingSaleDay := false
 			err = insert(junctionColl,
-				JunctionFilter{Appid: &app.Appid, ServerID: &guildID},
+				JunctionRecord{Appid: &app.Appid, ServerID: &guildID},
 				JunctionRecord{
-					Appid:           app.Appid,
-					ServerID:        guildID,
-					TrailingSaleDay: false,
+					Appid:           &app.Appid,
+					ServerID:        &guildID,
+					TrailingSaleDay: &trailingSaleDay,
+					ComingSoon:      &app.ComingSoon,
 				},
 			)
 			if err != nil {
@@ -363,19 +370,19 @@ func RemoveApps(guildID int64, appids []int) (succ []int, fail []int) {
 	for _, appid := range appids {
 		transactionFn := func(ctx mongo.SessionContext) (any, error) {
 			_, err := junctionColl.DeleteOne(ctx,
-				JunctionFilter{Appid: &appid, ServerID: &guildID})
+				JunctionRecord{Appid: &appid, ServerID: &guildID})
 			if err != nil {
 				return nil, err
 			}
 
-			count, err := junctionColl.CountDocuments(ctx, JunctionFilter{Appid: &appid})
+			count, err := junctionColl.CountDocuments(ctx, JunctionRecord{Appid: &appid})
 			if err != nil {
 				return nil, err
 			} else if count > 0 { // If not an orphan, no need to remove
 				return nil, nil
 			}
 
-			_, err = appsColl.DeleteOne(ctx, AppFilter{Appid: &appid})
+			_, err = appsColl.DeleteOne(ctx, AppRecord{Appid: &appid})
 			if err != nil {
 				return nil, err
 			}
@@ -396,7 +403,7 @@ func RemoveApps(guildID int64, appids []int) (succ []int, fail []int) {
 // ClearApps clears the apps under guildID. Does nothing if there
 // are no apps under the guild.
 func ClearApps(guildID int64) error {
-	cur, err := junctionColl.Find(ctx(), JunctionFilter{ServerID: &guildID})
+	cur, err := junctionColl.Find(ctx(), JunctionRecord{ServerID: &guildID})
 	if err != nil {
 		return err
 	}
@@ -405,7 +412,7 @@ func ClearApps(guildID int64) error {
 	// Extract appids
 	appids := []int{}
 	for cur.Next(ctx()) {
-		var rec JunctionRecord
+		var rec JunctionInfo
 		if err := cur.Decode(&rec); err != nil {
 			continue
 		}
@@ -426,23 +433,31 @@ func ClearApps(guildID int64) error {
 // SetChannelID sets the channelID alerts are sent for a guild
 func SetChannelID(guildID, channelID int64) error {
 	return update(discordColl,
-		DiscordFilter{ServerID: &guildID},
-		DiscordRecord{ChannelID: channelID},
+		DiscordRecord{ServerID: &guildID},
+		DiscordRecord{ChannelID: &channelID},
 	)
 }
 
 // SetThreshold sets the sale threshold for alerts sent to a guild
 func SetThreshold(guildID int64, threshold int) error {
 	return update(discordColl,
-		DiscordFilter{ServerID: &guildID},
-		DiscordRecord{SaleThreshold: threshold},
+		DiscordRecord{ServerID: &guildID},
+		DiscordRecord{SaleThreshold: &threshold},
 	)
 }
 
-// SetTrailingSaleDay sets the trailing sale day field for a guild
+// SetTrailingSaleDay sets the trailing sale day field for an app for a guild
 func SetTrailingSaleDay(guildID int64, appid int, sale bool) error {
 	return update(junctionColl,
-		JunctionFilter{ServerID: &guildID, Appid: &appid},
-		JunctionRecord{TrailingSaleDay: sale},
+		JunctionRecord{ServerID: &guildID, Appid: &appid},
+		JunctionRecord{TrailingSaleDay: &sale},
+	)
+}
+
+// SetComingSoon sets the coming soon field for an app for a guild
+func SetComingSoon(guildID int64, appid int, comingSoon bool) error {
+	return update(junctionColl,
+		JunctionRecord{ServerID: &guildID, Appid: &appid},
+		JunctionRecord{ComingSoon: &comingSoon},
 	)
 }

@@ -120,7 +120,6 @@ func apiGet[T any](endpoint string, value *T) error {
 
 	err = json.NewDecoder(resp.Body).Decode(&value)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 

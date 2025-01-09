@@ -74,7 +74,7 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Value: failStr,
 		})
 		em.Footer = &discordgo.MessageEmbedFooter{
-			Text: "Note: Make sure failed appids are either priced or are yet to be released",
+			Text: "Note: Make sure appids are either priced or are yet to be released",
 		}
 	}
 

@@ -43,9 +43,9 @@ func New(token, guild string) (b *SteamBot) {
 
 	b.registerHandlers([]interface{}{
 		b.commandHandler,
-		// guildCreateHandler,
-		// guildDeleteHandler,
-		// readyHandler,
+		guildCreateHandler,
+		guildDeleteHandler,
+		readyHandler,
 	})
 
 	return b
@@ -59,7 +59,14 @@ func (b *SteamBot) Start() {
 	}
 
 	b.registerCommands([]cmd.Cmd{
+		cmd.NewAddApps(),
 		cmd.NewBind(),
+		cmd.NewClearApps(),
+		cmd.NewHelp(),
+		cmd.NewListApps(),
+		cmd.NewRemoveApps(),
+		cmd.NewSearch(),
+		cmd.NewSetDiscountThreshold(),
 	})
 
 	sc := make(chan os.Signal, 1)
@@ -247,8 +254,9 @@ func periodicallyCheckApps(s *discordgo.Session) {
 	// This fn will attempt to fetch an App by appid and check for a sale,
 	// If an error occurs fetching the App (like an inevitable rate limit error
 	// from Steam), a wait out period will be put in place, then checkApps will
-	// be called again to resume checking.
-	var tryCheckApp func(appid int)
+	// be called again to resume checking. Returns whether or not the calling fn
+	// (checkApps) needs to exit for a cooldown.
+	var tryCheckApp func(appid int) bool
 
 	// The id of the App we are fetching. Populated through nextAppid().
 	var currAppid *int
@@ -261,6 +269,14 @@ func periodicallyCheckApps(s *discordgo.Session) {
 	// nextAppid().
 	var close func()
 
+	// This fn clears the state of checkApps so that the next call to it
+	// is not considered a resuming check.
+	reset := func() {
+		close()
+		currAppid = nil
+		nextAppid = nil
+	}
+
 	checkApps = func() {
 		if nextAppid == nil { // Get fresh apps if non-resuming check
 			nextAppid, close = db.Apps()
@@ -270,34 +286,40 @@ func periodicallyCheckApps(s *discordgo.Session) {
 		// were rate limited on. This was the appid we failed to create
 		// an App from, so we retry it.
 		if currAppid != nil {
-			tryCheckApp(*currAppid)
+			if exit := tryCheckApp(*currAppid); exit {
+				return
+			}
 		}
 
-		for currAppid = nextAppid(); currAppid != nil; {
-			tryCheckApp(*currAppid)
+		currAppid = nextAppid()
+		for currAppid != nil {
+			if exit := tryCheckApp(*currAppid); exit {
+				return
+			}
+			currAppid = nextAppid()
 		}
 
-		close()
-		// Set these to nil to indicate next check is non-resuming check
-		currAppid = nil
-		nextAppid = nil
+		// At this point, we have checked all apps, now schedule tomorrow's check
+		reset()
 		time.AfterFunc(time.Until(nextCheck()), checkApps)
 	}
 
-	tryCheckApp = func(appid int) {
+	tryCheckApp = func(appid int) (exit bool) {
 		app, err := steam.NewApp(appid)
-
-		if err == steam.ErrNetTryAgainLater {
+		if err != nil {
 			// On rate-limit, wait then resume
-			time.AfterFunc(5*time.Minute, checkApps)
-			return
-		} else if err != nil {
-			// On any other error, just abort today's check
-			time.AfterFunc(time.Until(nextCheck()), checkApps)
-			return
+			if err == steam.ErrNetTryAgainLater {
+				time.AfterFunc(5*time.Minute, checkApps)
+				// On any other error, just abort today's check
+			} else {
+				reset()
+				time.AfterFunc(time.Until(nextCheck()), checkApps)
+			}
+			return true
 		}
 
 		checkApp(s, app)
+		return false
 	}
 
 	checkApps()
@@ -318,17 +340,111 @@ func checkApp(s *discordgo.Session, app steam.App) {
 }
 
 func updateGuildOnApp(s *discordgo.Session, app steam.App, guild db.GuildInfo) {
-	onSale := app.Discount >= 0
+	db.SetTrailingSaleDay(guild.ServerID, guild.Appid, app.Discount > 0)
+	db.SetComingSoon(guild.ServerID, guild.Appid, app.ComingSoon)
 
-	db.SetTrailingSaleDay(guild.ServerID, guild.Appid, onSale)
+	channelID := strconv.FormatInt(guild.ChannelID, 10)
 
-	if !onSale || guild.TrailingSaleDay || app.Discount < guild.SaleThreshold ||
-		guild.ChannelID == 0 {
-		return
+	if !app.ComingSoon && guild.ComingSoon {
+		s.ChannelMessageSendEmbed(channelID, releaseEmbed(app))
+	} else if app.Discount >= guild.SaleThreshold && !guild.TrailingSaleDay &&
+		guild.ChannelID != 0 {
+		s.ChannelMessageSendEmbed(channelID, saleEmbed(app))
+	}
+}
+
+func releaseEmbed(app steam.App) *discordgo.MessageEmbed {
+	fields := []*discordgo.MessageEmbedField{
+		{
+			Name:  "Price",
+			Value: app.Final,
+		},
+		{
+			Name:  "Description",
+			Value: app.Description,
+		},
+	}
+	if fields[0].Value == "" {
+		fields[0].Value = "Free"
 	}
 
-	// TODO
-	// s.ChannelMessageSendEmbed(strconv.FormatInt(guild.ChannelID, 10),
-	// 	&discordgo.MessageEmbed{},
-	// )
+	return &discordgo.MessageEmbed{
+		Title:  fmt.Sprintf("%s has released on Steam!", app.Name),
+		URL:    app.Url(),
+		Image:  &discordgo.MessageEmbedImage{URL: app.Image},
+		Color:  0xFFFFFF,
+		Fields: fields,
+	}
+}
+
+func saleEmbed(app steam.App) *discordgo.MessageEmbed {
+	fields := []*discordgo.MessageEmbedField{
+		{
+			Name:   "Original Price",
+			Value:  app.Initial,
+			Inline: true,
+		},
+		{
+			Name:   "Sale Price",
+			Value:  app.Final,
+			Inline: true,
+		},
+	}
+	if app.Reviews > 0 {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Reviews",
+			Value:  strconv.Itoa(app.Reviews),
+			Inline: true,
+		})
+	}
+	if app.Description != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:  "Description",
+			Value: app.Description,
+		})
+	}
+
+	return &discordgo.MessageEmbed{
+		Title:  fmt.Sprintf("%s is on sale for %d%% off!", app.Name, app.Discount),
+		URL:    app.Url(),
+		Image:  &discordgo.MessageEmbedImage{URL: app.Image},
+		Color:  discountColor(app.Discount),
+		Fields: fields,
+	}
+}
+
+func discountColor(discount int) int {
+	atMost := func(high int) bool {
+		return discount <= high
+	}
+	switch {
+	case atMost(5):
+		return 0x0bff33
+	case atMost(10):
+		return 0x44fdd2
+	case atMost(15):
+		return 0x44fdfd
+	case atMost(20):
+		return 0x44dbfd
+	case atMost(25):
+		return 0x44b6fd
+	case atMost(30):
+		return 0x448bfd
+	case atMost(35):
+		return 0x445afd
+	case atMost(40):
+		return 0x8544fd
+	case atMost(45):
+		return 0xb044fd
+	case atMost(50):
+		return 0xe144fd
+	case atMost(55):
+		return 0xfd44de
+	case atMost(60):
+		return 0xff23a7
+	case atMost(99):
+		return 0xff0000
+	default:
+		return 0xFFFFFF
+	}
 }

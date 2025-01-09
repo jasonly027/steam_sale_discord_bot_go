@@ -73,6 +73,9 @@ func searchHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			{
 				Title:       "Search",
 				Description: "Select an app below",
+				Footer: &discordgo.MessageEmbedFooter{
+					Text: "Note: Ensure selected app is priced or has yet to be released",
+				},
 			},
 		},
 		Components: &[]discordgo.MessageComponent{

@@ -16,13 +16,13 @@ func NewHelp() Cmd {
 					Fields: []*discordgo.MessageEmbedField{
 						{
 							Name: "/bind <text_channel>",
-							Value: "Set the channel to where sale alerts are sent. " +
+							Value: "Set the channel to where alerts are sent. " +
 								"By default, sends to the default channel.",
 						},
 						{
 							Name: "/set_discount_threshold <percentage>",
 							Value: "Set the minimum discount percentage warranting an alert of an app sale. " +
-								"By default, the threshold is 1%",
+								"By default, the threshold is 1%.",
 						},
 						{
 							Name:  "/add_apps <appId,appId,...>",
