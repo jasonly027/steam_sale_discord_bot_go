@@ -148,6 +148,8 @@ func guildCreateHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
 	}
 
 	db.AddGuild(guildID, channelID)
+
+	s.ApplicationCommandBulkOverwrite(s.State.User.ID, g.ID, []*discordgo.ApplicationCommand{})
 }
 
 func defaultTextChannel(s *discordgo.Session, chs []*discordgo.Channel) (int64, error) {
