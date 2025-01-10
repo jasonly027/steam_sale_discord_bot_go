@@ -227,8 +227,9 @@ func loc_PDT() *time.Location {
 
 // nextCheck gets when the next sale check is as a Time object.
 func nextCheck() time.Time {
-	now := time.Now()
-	timeOfCheck := time.Date(now.Year(), now.Month(), now.Day(), 10, 5, 0, 0, loc_PDT())
+	loc := loc_PDT()
+	now := time.Now().In(loc)
+	timeOfCheck := time.Date(now.Year(), now.Month(), now.Day(), 10, 5, 0, 0, loc)
 	if now.After(timeOfCheck) {
 		timeOfCheck = timeOfCheck.Add(24 * time.Hour)
 	}
