@@ -62,6 +62,7 @@ type GuildInfo struct {
 	ServerID         int64
 	ChannelID        int64
 	Appid            int
+	AppName          string
 	AppSaleThreshold int
 	SaleThreshold    int
 	TrailingSaleDay  bool
@@ -199,10 +200,19 @@ func RemoveGuild(guildID int64) error {
 	return err
 }
 
-// AppsOf finds all AppRecords tracked by the guild matching guildID.
+// AppsOf finds all GuildInfos tracked by the guild matching guildID.
 // If guildID hasn't been added through AddGuild(...), an empty
 // list will be returned.
-func AppsOf(guildID int64) (appRecords []AppInfo, err error) {
+func AppsOf(guildID int64) (guildInfos []GuildInfo, err error) {
+	findGuildRes := discordColl.FindOne(ctx(), DiscordRecord{ServerID: &guildID})
+	if err := findGuildRes.Err(); err != nil {
+		return nil, err
+	}
+	var dInfo DiscordInfo
+	if err := findGuildRes.Decode(&dInfo); err != nil {
+		return nil, err
+	}
+
 	cur, err := junctionColl.Find(ctx(), JunctionRecord{ServerID: &guildID})
 	if err != nil {
 		return nil, err
@@ -226,13 +236,23 @@ func AppsOf(guildID int64) (appRecords []AppInfo, err error) {
 			continue
 		}
 
-		appRecords = append(appRecords, aInfo)
+		guildInfos = append(guildInfos,
+			GuildInfo{
+				ServerID:         dInfo.ServerID,
+				ChannelID:        dInfo.ChannelID,
+				Appid:            aInfo.Appid,
+				AppName:          aInfo.AppName,
+				AppSaleThreshold: jInfo.SaleThreshold,
+				SaleThreshold:    dInfo.SaleThreshold,
+				TrailingSaleDay:  jInfo.TrailingSaleDay,
+				ComingSoon:       jInfo.ComingSoon,
+			})
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err
 	}
 
-	return appRecords, nil
+	return guildInfos, nil
 }
 
 func Apps() (nextApp func() *int, close func()) {

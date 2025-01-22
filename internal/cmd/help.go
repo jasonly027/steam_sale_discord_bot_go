@@ -27,12 +27,12 @@ func NewHelp() Cmd {
 						},
 						{
 							Name: "/add_apps <appid,appid, ...> <threshold>",
-							Value: "Add comma separated app IDs to the tracker. Optionally, specify a " +
+							Value: "Add comma separated appids to the tracker. Optionally, specify a " +
 								"specific discount threshold.",
 						},
 						{
 							Name:  "/remove_apps <appid,appid, ...>",
-							Value: "Remove comma separated app IDs from the tracker.",
+							Value: "Remove comma separated appids from the tracker.",
 						},
 						{
 							Name:  "/search <query>",
@@ -40,7 +40,7 @@ func NewHelp() Cmd {
 						},
 						{
 							Name:  "/list_apps",
-							Value: "List all the apps currently being tracked."},
+							Value: "List apps being tracked and their discount thresholds."},
 						{
 							Name:  "/clear_apps",
 							Value: "Clear the tracking list.",
