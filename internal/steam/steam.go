@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// App is appDetails flattened and simplified
+// App is appDetails flattened and with a settable SaleThreshold
 type App struct {
 	Name        string
 	Appid       int
@@ -21,6 +21,7 @@ type App struct {
 	Reviews     int
 	ComingSoon  bool
 	Price
+	SaleThreshold *int
 }
 
 type Price struct {

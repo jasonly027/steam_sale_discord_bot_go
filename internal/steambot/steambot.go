@@ -148,8 +148,6 @@ func guildCreateHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
 	}
 
 	db.AddGuild(guildID, channelID)
-
-	s.ApplicationCommandBulkOverwrite(s.State.User.ID, g.ID, []*discordgo.ApplicationCommand{})
 }
 
 func defaultTextChannel(s *discordgo.Session, chs []*discordgo.Channel) (int64, error) {
@@ -347,12 +345,26 @@ func updateGuildOnApp(s *discordgo.Session, app steam.App, guild db.GuildInfo) {
 	db.SetTrailingSaleDay(guild.ServerID, guild.Appid, app.Discount > 0)
 	db.SetComingSoon(guild.ServerID, guild.Appid, app.ComingSoon)
 
+	if guild.ChannelID == 0 {
+		return
+	}
 	channelID := strconv.FormatInt(guild.ChannelID, 10)
 
 	if !app.ComingSoon && guild.ComingSoon {
 		s.ChannelMessageSendEmbed(channelID, releaseEmbed(app))
-	} else if app.Discount >= guild.SaleThreshold && !guild.TrailingSaleDay &&
-		guild.ChannelID != 0 {
+	}
+
+	if guild.TrailingSaleDay {
+		return
+	}
+
+	// If app has specific threshold, compare with it.
+	if guild.AppSaleThreshold != 0 {
+		if app.Discount >= guild.AppSaleThreshold {
+			s.ChannelMessageSendEmbed(channelID, saleEmbed(app))
+		}
+		// Otherwise, compare with server's general threshold.
+	} else if app.Discount >= guild.SaleThreshold {
 		s.ChannelMessageSendEmbed(channelID, saleEmbed(app))
 	}
 }

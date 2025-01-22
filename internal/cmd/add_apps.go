@@ -12,6 +12,7 @@ import (
 
 // NewAddApps creates /add_apps <appid>,<appid>,...
 func NewAddApps() Cmd {
+	min := float64(1)
 	return Cmd{
 		Name:        "add_apps",
 		Description: "Add apps by their appid to the tracker",
@@ -25,6 +26,13 @@ func NewAddApps() Cmd {
 				Required:  true,
 				MaxLength: 150,
 			},
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "threshold",
+				Description: "The minimum discount required to trigger a sale alert for these appids specifically",
+				MinValue:    &min,
+				MaxValue:    99,
+			},
 		},
 	}
 }
@@ -36,6 +44,12 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Parse appids
 	strs := strings.Split(i.ApplicationCommandData().Options[0].StringValue(), ",")
 	succApps, invalidAppids := strsToApps(strs)
+	if len(i.ApplicationCommandData().Options) > 1 {
+		saleThreshold := int(i.ApplicationCommandData().Options[1].IntValue())
+		for _, app := range succApps {
+			app.SaleThreshold = &saleThreshold
+		}
+	}
 
 	// Parse guildID
 	guildID, err := strconv.ParseInt(i.GuildID, 10, 64)
@@ -86,7 +100,7 @@ func addAppsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 // strsToApps iterates through ss and, tries to create
 // valid App's with them. Valid apps need to have the price_overview
 // field set or haven't been released yet
-func strsToApps(ss []string) (succ []steam.App, fail []string) {
+func strsToApps(ss []string) (succ []*steam.App, fail []string) {
 	for _, s := range ss {
 		s = strings.TrimSpace(s)
 
@@ -105,7 +119,7 @@ func strsToApps(ss []string) (succ []steam.App, fail []string) {
 			continue
 		}
 
-		succ = append(succ, app)
+		succ = append(succ, &app)
 	}
 
 	return succ, fail

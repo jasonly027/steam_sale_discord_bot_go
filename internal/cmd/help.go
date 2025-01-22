@@ -20,16 +20,18 @@ func NewHelp() Cmd {
 								"By default, sends to the default channel.",
 						},
 						{
-							Name: "/set_discount_threshold <percentage>",
+							Name: "/set_discount_threshold <threshold> <appid, appid, ...>",
 							Value: "Set the minimum discount percentage warranting an alert of an app sale. " +
-								"By default, the threshold is 1%.",
+								"By default, the threshold is 1%. Optionally, specify specific appids the " +
+								"threshold applies to.",
 						},
 						{
-							Name:  "/add_apps <appId,appId,...>",
-							Value: "Add comma separated app IDs to the tracker.",
+							Name: "/add_apps <appid,appid, ...> <threshold>",
+							Value: "Add comma separated app IDs to the tracker. Optionally, specify a " +
+								"specific discount threshold.",
 						},
 						{
-							Name:  "/remove_apps <appId,appId,...>",
+							Name:  "/remove_apps <appid,appid, ...>",
 							Value: "Remove comma separated app IDs from the tracker.",
 						},
 						{

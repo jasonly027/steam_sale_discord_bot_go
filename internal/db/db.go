@@ -47,6 +47,7 @@ type JunctionRecord struct {
 	ServerID        *int64 `bson:"server_id,omitempty"`
 	TrailingSaleDay *bool  `bson:"is_trailing_sale_day,omitempty"`
 	ComingSoon      *bool  `bson:"coming_soon,omitempty"`
+	SaleThreshold   *int   `bson:"sale_threshold,omitempty"`
 }
 
 type JunctionInfo struct {
@@ -54,15 +55,17 @@ type JunctionInfo struct {
 	ServerID        int64 `bson:"server_id"`
 	TrailingSaleDay bool  `bson:"is_trailing_sale_day"`
 	ComingSoon      bool  `bson:"coming_soon"`
+	SaleThreshold   int   `bson:"sale_threshold"`
 }
 
 type GuildInfo struct {
-	ServerID        int64
-	ChannelID       int64
-	Appid           int
-	SaleThreshold   int
-	TrailingSaleDay bool
-	ComingSoon      bool
+	ServerID         int64
+	ChannelID        int64
+	Appid            int
+	AppSaleThreshold int
+	SaleThreshold    int
+	TrailingSaleDay  bool
+	ComingSoon       bool
 }
 
 func ctx() context.Context {
@@ -287,12 +290,13 @@ func GuildsOf(appid int) (guildInfos []GuildInfo, err error) {
 
 		guildInfos = append(guildInfos,
 			GuildInfo{
-				ServerID:        dInfo.ServerID,
-				ChannelID:       dInfo.ChannelID,
-				Appid:           jInfo.Appid,
-				SaleThreshold:   dInfo.SaleThreshold,
-				TrailingSaleDay: jInfo.TrailingSaleDay,
-				ComingSoon:      jInfo.ComingSoon,
+				ServerID:         dInfo.ServerID,
+				ChannelID:        dInfo.ChannelID,
+				Appid:            jInfo.Appid,
+				AppSaleThreshold: jInfo.SaleThreshold,
+				SaleThreshold:    dInfo.SaleThreshold,
+				TrailingSaleDay:  jInfo.TrailingSaleDay,
+				ComingSoon:       jInfo.ComingSoon,
 			},
 		)
 	}
@@ -305,7 +309,7 @@ func GuildsOf(appid int) (guildInfos []GuildInfo, err error) {
 
 // AddApps adds apps under a guild. If guildID hasn't been added through AddGuild(...),
 // adding the apps will still work but they won't be retrievable through AppsOf(...).
-func AddApps(guildID int64, apps []steam.App) (succ []steam.App, fail []steam.App) {
+func AddApps(guildID int64, apps []*steam.App) (succ []*steam.App, fail []*steam.App) {
 	sess, err := client.StartSession()
 	if err != nil {
 		return nil, apps
@@ -335,6 +339,7 @@ func AddApps(guildID int64, apps []steam.App) (succ []steam.App, fail []steam.Ap
 					ServerID:        &guildID,
 					TrailingSaleDay: &trailingSaleDay,
 					ComingSoon:      &app.ComingSoon,
+					SaleThreshold:   app.SaleThreshold,
 				},
 			)
 			if err != nil {
@@ -444,6 +449,37 @@ func SetThreshold(guildID int64, threshold int) error {
 		DiscordRecord{ServerID: &guildID},
 		DiscordRecord{SaleThreshold: &threshold},
 	)
+}
+
+// SetThresholds sets the sale threshold for alerts sent to a guild
+// for the specific appids
+func SetThresholds(guildID int64, threshold int, appids []int) (succ []int, fail []int) {
+	sess, err := client.StartSession()
+	if err != nil {
+		return nil, appids
+	}
+	defer sess.EndSession(ctx())
+
+	for _, appid := range appids {
+		transactionFn := func(ctx mongo.SessionContext) (any, error) {
+			err := update(junctionColl,
+				JunctionRecord{ServerID: &guildID, Appid: &appid},
+				JunctionRecord{SaleThreshold: &threshold})
+			if err != nil {
+				return nil, err
+			}
+
+			return nil, nil
+		}
+
+		if _, err := sess.WithTransaction(ctx(), transactionFn); err != nil {
+			fail = append(fail, appid)
+		} else {
+			succ = append(succ, appid)
+		}
+	}
+
+	return succ, fail
 }
 
 // SetTrailingSaleDay sets the trailing sale day field for an app for a guild
