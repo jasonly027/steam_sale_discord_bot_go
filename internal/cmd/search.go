@@ -96,7 +96,7 @@ func searchCompConfirmHandler(s *discordgo.Session, i *discordgo.InteractionCrea
 	choice := i.MessageComponentData().Values[0]
 
 	// Check if cancel
-	if choice == clearAppsCompCancel {
+	if choice == searchCompCancelStr {
 		CompReply(s, i, &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{
