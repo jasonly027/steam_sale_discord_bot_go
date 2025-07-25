@@ -13,11 +13,20 @@ import (
 func main() {
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
-		log.Fatal("MONGODB_URI not set as env variable or in .env")
+		if data, err := os.ReadFile(os.Getenv("MONGODB_URI_FILE")); err == nil {
+			uri = string(data)
+		} else {
+			log.Fatal("MONGODB_URI not set as env variable or in .env, and MONGODB_URI_FILE not readable")
+		}
 	}
+
 	dbName := os.Getenv("MONGODB_DBNAME")
 	if dbName == "" {
-		log.Fatal("MONGODB_DBNAME not set as env variable or in .env")
+		if data, err := os.ReadFile(os.Getenv("MONGODB_DBNAME_FILE")); err == nil {
+			dbName = string(data)
+		} else {
+			log.Fatal("MONGODB_DBNAME not set as env variable or in .env, and MONGODB_DBNAME_FILE not readable")
+		}
 	}
 
 	db.Init(uri, dbName)
@@ -25,7 +34,11 @@ func main() {
 
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
-		log.Fatal("Discord API token not set as env variable or in .env")
+		if data, err := os.ReadFile(os.Getenv("DISCORD_TOKEN_FILE")); err == nil {
+			token = string(data)
+		} else {
+			log.Fatal("Discord API token not set as env variable or in .env, and DISCORD_TOKEN_FILE not readable")
+		}
 	}
 	guild := os.Getenv("DISCORD_DEV_GUILDID")
 	if guild == "" {

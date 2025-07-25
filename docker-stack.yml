@@ -1,0 +1,19 @@
+services:
+  app:
+    image: jasonly027/steam_sale_bot
+    environment:
+      - MONGODB_URI_FILE=/run/secrets/steam_sale_bot_mongodb_uri
+      - MONGODB_DBNAME_FILE=/run/secrets/steam_sale_bot_mongodb_dbname
+      - DISCORD_TOKEN_FILE=/run/secrets/steam_sale_bot_discord_token
+    secrets:
+      - steam_sale_bot_mongodb_uri
+      - steam_sale_bot_mongodb_dbname
+      - steam_sale_bot_discord_token
+
+secrets:
+  steam_sale_bot_mongodb_uri:
+    external: true
+  steam_sale_bot_mongodb_dbname:
+    external: true
+  steam_sale_bot_discord_token:
+    external: true
